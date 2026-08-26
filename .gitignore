@@ -1,0 +1,40 @@
+# ===== 环境与数据 =====
+miniconda3/
+PanCollection/
+test_*.h5
+.vscode/
+
+# ===== 已存在于 GitHub 的公开仓库（无需重复上传） =====
+DLPan-Toolbox/
+Dconv/Vim/
+zup/Vim/
+
+# ===== 模型权重、结果与输出 =====
+model_FUG/
+model_SDE/
+model_pretrain/
+Dconv/model_FUG/
+Dconv/model_SDE/
+Dconv/model_pretrain/
+Dconv/pretrained_model/
+Dconv/result/
+zup/model_FUG/
+zup/model_SDE/
+zup/model_pretrain/
+zup/pretrained_model/
+zup/result/
+zup/reduce_result/
+zup/useless/
+Dconv/FusionMamba/model/
+Dconv/FusionMamba/weights/
+Dconv/FusionMamba/images/
+zup/FusionMamba/model/
+zup/FusionMamba/weights/
+zup/FusionMamba/images/
+
+# ===== 杂项 =====
+__pycache__/
+*.pyc
+nohup.out
+*.png
+=1.1.0
