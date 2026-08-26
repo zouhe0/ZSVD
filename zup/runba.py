@@ -86,8 +86,11 @@ def process_single_image(data_id, args):
                 f"--ratio={args.ratio}",
                 f"--temperature={args.temperature}",
                 f"--alfa={args.alfa}",
-                f"--data_path={args.data_path}"
-
+                f"--data_path={args.data_path}",
+                f"--use_reduced={args.use_reduced}",
+                f"--reduced_data_path={args.reduced_data_path}",
+                f"--reduced_every={args.reduced_every}",
+                f"--reduced_loss_weight={args.reduced_loss_weight}"
                 ]
         
             print(f"执行命令: {' '.join(train_cmd)}")

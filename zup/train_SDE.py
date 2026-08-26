@@ -12,7 +12,7 @@ import os
 # 导入混合精度训练所需的库
 from torch.cuda.amp import autocast, GradScaler
 
-from data import Dataset  # 数据加载器
+from data import Dataset, ReducedDataset  # 数据加载器
 from mymodel import FusionNet  # 学生模型
 from SDE import Net_ms2pan_dual,sobel_filter,ms2pan_convNet_dual  # SDE模块
 print("Updated sys.path:", sys.path)
@@ -41,6 +41,14 @@ parser.add_argument("--temperature", type=float, default=1.0, help="蒸馏温度
 parser.add_argument("--amp",default=True, action="store_true", help="启用混合精度训练")
 parser.add_argument("--alfa", type=float, default=0.15, help="损失权重")
 parser.add_argument("--data_path", type=str, default=r"HardDisk/HeZou/test_wv3_OrigScale_multiExm1.h5", help="数据文件路径")
+parser.add_argument("--use_reduced", type=int, default=1, choices=[0, 1],
+                    help="是否启用reduced数据训练 (1启用, 0禁用)")
+parser.add_argument("--reduced_data_path", type=str, default=None,
+                    help="预构造的reduced数据h5路径，默认: <data_path>去掉.h5加_reduced.h5")
+parser.add_argument("--reduced_every", type=int, default=10,
+                    help="每N个epoch训练一次reduced数据 (默认10, 即10%)")
+parser.add_argument("--reduced_loss_weight", type=float, default=1.0,
+                    help="reduced数据gt损失的权重")
 args = parser.parse_args()
 
 lr = args.lr
@@ -68,6 +76,15 @@ w_spec = (1-alfa)*ri    # 光谱损失权重
 
 # 数据文件路径
 data_path = args.data_path
+
+# reduced 数据相关设置
+use_reduced = bool(args.use_reduced)
+reduced_every = args.reduced_every
+reduced_loss_weight = args.reduced_loss_weight
+if args.reduced_data_path and args.reduced_data_path != 'None':
+    reduced_data_path = args.reduced_data_path
+else:
+    reduced_data_path = os.path.splitext(data_path)[0] + "_reduced.h5"
 
 
 # U2Net预训练模型路径
@@ -111,7 +128,7 @@ def save_checkpoint(model, identifier):
     torch.save(model.state_dict(), model_out_path)
 
 # ================ 知识蒸馏训练过程 ================ #
-def train(training_data_loader, identifier, teacher_output):
+def train(training_data_loader, reduced_data_loader, identifier, teacher_output):
     print("开始知识蒸馏训练...")
     
     # 教师输出直接来自FusionMamba_2024结果文件（不运行教师网络）
@@ -122,160 +139,200 @@ def train(training_data_loader, identifier, teacher_output):
 
     for epoch in range(1, epochs + 1):
         model_student.train()
-        epoch_loss_var, epoch_loss_spa, epoch_loss_spec = [], [], []
-        
-        for i, batch in enumerate(training_data_loader):
-            # 跳过教师模型预计算失败的批次
-            if teacher_outputs[i] is None:
-                continue
-                
-            ms, lms, pan = batch[0].to(device), batch[1].to(device), batch[2].to(device)
-            optimizer.zero_grad()
+        epoch_total_loss = []
+        epoch_loss_var, epoch_loss_spa, epoch_loss_spec, epoch_loss_red = [], [], [], []
 
-            # 确保pan维度正确
-            if len(pan.shape) == 3:
-                pan = pan.unsqueeze(1)
-            
-            # 使用混合精度进行前向传播和损失计算
-            if use_amp:
-                with autocast():
+        # reduced 数据轮次: 每 reduced_every 个 epoch 用一次 reduced 数据训练
+        use_reduced_epoch = (reduced_data_loader is not None) and (epoch % reduced_every == 0)
+
+        if use_reduced_epoch:
+            # ---------- reduced 数据: 用 gt 构造损失 ----------
+            for i, batch in enumerate(reduced_data_loader):
+                lms, pan, gt = batch[0].to(device), batch[1].to(device), batch[2].to(device)
+                optimizer.zero_grad()
+
+                # 确保pan维度正确
+                if len(pan.shape) == 3:
+                    pan = pan.unsqueeze(1)
+
+                # 学生模型前向传播
+                res_student = model_student(lms, pan)
+                fusion_out = (res_student + lms).squeeze(0)  # [C, H, W]
+                gt = gt.squeeze(0)
+
+                # reduced 数据由 full 构造得到，有 gt，直接用 gt 构造损失
+                loss_red = torch.mean((fusion_out - gt) ** 2)
+                total_loss = reduced_loss_weight * loss_red
+
+                epoch_loss_red.append(loss_red.item())
+                epoch_total_loss.append(total_loss.item())
+
+                total_loss.backward()
+                optimizer.step()
+        else:
+            # ---------- full 数据: 保持原有SDE蒸馏损失 ----------
+            epoch_loss_var, epoch_loss_spa, epoch_loss_spec = [], [], []
+
+            for i, batch in enumerate(training_data_loader):
+                # 跳过教师模型预计算失败的批次
+                if teacher_outputs[i] is None:
+                    continue
+
+                ms, lms, pan = batch[0].to(device), batch[1].to(device), batch[2].to(device)
+                optimizer.zero_grad()
+
+                # 确保pan维度正确
+                if len(pan.shape) == 3:
+                    pan = pan.unsqueeze(1)
+
+                # 使用混合精度进行前向传播和损失计算
+                if use_amp:
+                    with autocast():
+                        # 学生模型前向传播
+                        res_student = model_student(lms, pan)
+                        fusion_out_ori = res_student + lms  
+                        fusion_out = fusion_out_ori.squeeze(0)  # [C, H, W]
+
+                        # 使用预计算的教师模型输出
+                        fusion_out_teacher = teacher_outputs[i].to(device).squeeze(0)
+                        fusion_out_teacher_bchw = fusion_out_teacher.unsqueeze(0)  # 确保维度正确b c h w
+
+                        #计算patch-wise变分损失权重
+                        # teacher_outputs_lr = F.max_pool2d(fusion_out_teacher_bchw, kernel_size=4, stride=4)  # 使用最大池化代替Wald协议
+
+                        # delta = (teacher_outputs_lr - ms).abs()                     # 逐元素差值的绝对值
+                        # # delta: [B, C, H, W]
+                        # delta_max = delta.amax(dim=(2, 3), keepdim=True)   # 每个通道独立的最大值
+                        # delta_inv = torch.exp(-delta / (delta_max + 1e-8))
+                        # delta_up = F.interpolate(delta_inv, scale_factor=4, mode='nearest')
+
+                        #计算pixel-wise变分损失权重
+                        ms_up = F.interpolate(ms, scale_factor=ratio, mode='nearest')
+                        delta = (fusion_out_teacher_bchw - ms_up).abs()  #
+                        delta_max = delta.amax(dim=(2, 3), keepdim=True)  # 每个通道独立的最大值
+                        delta_up = torch.exp(-delta / (delta_max + 1e-8))
+
+                        #print(delta_up.mean().item())
+                        # 变分损失 (与train_or.py中的loss1对应)
+                        loss_var = torch.mean(((fusion_out - fusion_out_teacher)*delta_up) ** 2)
+
+                        # 转换为[H, W, C]格式用于计算其他损失
+                        fusion_out_hw_c = fusion_out.permute(1, 2, 0)
+
+                        # 获取低分辨率图像尺寸并计算block_size
+                        _, H, _ = ms[0].shape
+                        block_size = H // ratio
+
+                        # # 空间保真度损失 (与train_or.py中的loss2对应)
+                        # loss_spa = loss_calculator.compute_spatial_fidelity_loss(
+                        #     fusion_out_hw_c,
+                        #     ms[0].permute(1, 2, 0),
+                        #     pan[0].squeeze(0),
+                        #     block_size
+                        # )
+                        # 使用SDE网络将多光谱图像转换为全色图像
+                        with autocast() if use_amp else torch.no_grad():
+                            fusion_out_gra_x,fusion_out_gra_y = sobel_filter(fusion_out_ori)
+                            sde_out_x,sde_out_y = F_ms2pan(fusion_out_gra_x,fusion_out_gra_y) # 假设SDE网络输出维度为 [batch_size, 1, H, W]，因此需要squeeze掉通道维度
+
+                        # 计算MS再SDE网络输出和pan图的L2损失
+                        pan_gra_x,pan_gra_y = sobel_filter(pan)
+                        loss_x = loss_calculator.SDE_Loss(sde_out_x , pan_gra_x)
+                        loss_y = loss_calculator.SDE_Loss(sde_out_y , pan_gra_y)
+                        loss_spa = (loss_x + loss_y)/100
+                        # loss_spa = loss_x/100
+
+                        # 光谱损失 (与train_or.py中的loss3对应)
+                        loss_spec = loss_calculator.compute_spectral_loss(
+                            fusion_out_hw_c, 
+                            ms[0].permute(1, 2, 0)
+                        )
+                        loss_spec_teacher = loss_calculator.compute_spectral_loss(
+                            fusion_out_teacher.permute(1, 2, 0), 
+                            ms[0].permute(1, 2, 0)
+                        )
+
+                        weight = torch.sigmoid(1*(torch.abs(loss_spec_teacher - 28.65)/10))*2.0
+
+                        # 总损失 (使用train_or.py中的权重)
+
+                        total_loss = (w_var/weight) * loss_var + (w_spa * loss_spa + w_spec * loss_spec)
+
+                    # 使用梯度缩放器进行反向传播
+                    scaler.scale(total_loss).backward()
+
+                    # 更新梯度并执行优化步骤
+                    scaler.step(optimizer)
+                    #scaler.update()
+
+                    scaler.update()
+
+                else:
+                    # 标准精度训练流程
                     # 学生模型前向传播
                     res_student = model_student(lms, pan)
-                    fusion_out_ori = res_student + lms  
-                    fusion_out = fusion_out_ori.squeeze(0)  # [C, H, W]
-                    
+                    fusion_out = res_student + lms
+                    fusion_out = fusion_out.squeeze(0)  # [C, H, W]
+
                     # 使用预计算的教师模型输出
                     fusion_out_teacher = teacher_outputs[i].to(device).squeeze(0)
-                    fusion_out_teacher_bchw = fusion_out_teacher.unsqueeze(0)  # 确保维度正确b c h w
 
-                    #计算patch-wise变分损失权重
-                    # teacher_outputs_lr = F.max_pool2d(fusion_out_teacher_bchw, kernel_size=4, stride=4)  # 使用最大池化代替Wald协议
-                    
-                    # delta = (teacher_outputs_lr - ms).abs()                     # 逐元素差值的绝对值
-                    # # delta: [B, C, H, W]
-                    # delta_max = delta.amax(dim=(2, 3), keepdim=True)   # 每个通道独立的最大值
-                    # delta_inv = torch.exp(-delta / (delta_max + 1e-8))
-                    # delta_up = F.interpolate(delta_inv, scale_factor=4, mode='nearest')
-
-                    #计算pixel-wise变分损失权重
-                    ms_up = F.interpolate(ms, scale_factor=ratio, mode='nearest')
-                    delta = (fusion_out_teacher_bchw - ms_up).abs()  #
-                    delta_max = delta.amax(dim=(2, 3), keepdim=True)  # 每个通道独立的最大值
-                    delta_up = torch.exp(-delta / (delta_max + 1e-8))
-
-                    #print(delta_up.mean().item())
                     # 变分损失 (与train_or.py中的loss1对应)
-                    loss_var = torch.mean(((fusion_out - fusion_out_teacher)*delta_up) ** 2)
-                    
+                    loss_var = torch.mean((fusion_out - fusion_out_teacher) ** 2)
+
                     # 转换为[H, W, C]格式用于计算其他损失
                     fusion_out_hw_c = fusion_out.permute(1, 2, 0)
-                    
+
                     # 获取低分辨率图像尺寸并计算block_size
-                    _, H, _ = ms[0].shape
+                    _, H, _ = ms.shape
                     block_size = H // ratio
-                    
-                    # # 空间保真度损失 (与train_or.py中的loss2对应)
-                    # loss_spa = loss_calculator.compute_spatial_fidelity_loss(
-                    #     fusion_out_hw_c,
-                    #     ms[0].permute(1, 2, 0),
-                    #     pan[0].squeeze(0),
-                    #     block_size
-                    # )
                     # 使用SDE网络将多光谱图像转换为全色图像
                     with autocast() if use_amp else torch.no_grad():
-                        fusion_out_gra_x,fusion_out_gra_y = sobel_filter(fusion_out_ori)
-                        sde_out_x,sde_out_y = F_ms2pan(fusion_out_gra_x,fusion_out_gra_y) # 假设SDE网络输出维度为 [batch_size, 1, H, W]，因此需要squeeze掉通道维度
+                        sde_out = F_ms2pan(fusion_out_ori).squeeze(1).squeeze(0)  # 假设SDE网络输出维度为 [batch_size, 1, H, W]，因此需要squeeze掉通道维度
 
-                    # 计算MS再SDE网络输出和pan图的L2损失
-                    pan_gra_x,pan_gra_y = sobel_filter(pan)
-                    loss_x = loss_calculator.SDE_Loss(sde_out_x , pan_gra_x)
-                    loss_y = loss_calculator.SDE_Loss(sde_out_y , pan_gra_y)
-                    loss_spa = (loss_x + loss_y)/100
-                    # loss_spa = loss_x/100
+                        # 计算MS再SDE网络输出和pan图的L2损失
+                        #print(np.shape(sde_out), np.shape(pan[0].squeeze(0)))
+                    loss_spa = loss_calculator.SDE_Loss(sde_out , pan.squeeze(0))
+
+
 
                     # 光谱损失 (与train_or.py中的loss3对应)
                     loss_spec = loss_calculator.compute_spectral_loss(
                         fusion_out_hw_c, 
-                        ms[0].permute(1, 2, 0)
+                        ms.permute(1, 2, 0)
                     )
-                    loss_spec_teacher = loss_calculator.compute_spectral_loss(
-                        fusion_out_teacher.permute(1, 2, 0), 
-                        ms[0].permute(1, 2, 0)
-                    )
-
-                    weight = torch.sigmoid(1*(torch.abs(loss_spec_teacher - 28.65)/10))*2.0
 
                     # 总损失 (使用train_or.py中的权重)
+                    total_loss = w_var * loss_var + w_spa * loss_spa + w_spec * loss_spec
 
-                    total_loss = (w_var/weight) * loss_var + (w_spa * loss_spa + w_spec * loss_spec)
-                
-                # 使用梯度缩放器进行反向传播
-                scaler.scale(total_loss).backward()
-                
-                # 更新梯度并执行优化步骤
-                scaler.step(optimizer)
-                #scaler.update()
+                    # 标准反向传播和优化步骤
+                    total_loss.backward()
+                    optimizer.step()
 
-                scaler.update()
+                # 记录各损失值
+                epoch_loss_var.append(loss_var.item())
+                epoch_loss_spa.append(loss_spa.item())
+                epoch_loss_spec.append(loss_spec.item())
+                epoch_total_loss.append(total_loss.item())
 
-            else:
-                # 标准精度训练流程
-                # 学生模型前向传播
-                res_student = model_student(lms, pan)
-                fusion_out = res_student + lms
-                fusion_out = fusion_out.squeeze(0)  # [C, H, W]
-                
-                # 使用预计算的教师模型输出
-                fusion_out_teacher = teacher_outputs[i].to(device).squeeze(0)
-                
-                # 变分损失 (与train_or.py中的loss1对应)
-                loss_var = torch.mean((fusion_out - fusion_out_teacher) ** 2)
-                
-                # 转换为[H, W, C]格式用于计算其他损失
-                fusion_out_hw_c = fusion_out.permute(1, 2, 0)
-                
-                # 获取低分辨率图像尺寸并计算block_size
-                _, H, _ = ms.shape
-                block_size = H // ratio
-                # 使用SDE网络将多光谱图像转换为全色图像
-                with autocast() if use_amp else torch.no_grad():
-                    sde_out = F_ms2pan(fusion_out_ori).squeeze(1).squeeze(0)  # 假设SDE网络输出维度为 [batch_size, 1, H, W]，因此需要squeeze掉通道维度
-
-                    # 计算MS再SDE网络输出和pan图的L2损失
-                    #print(np.shape(sde_out), np.shape(pan[0].squeeze(0)))
-                loss_spa = loss_calculator.SDE_Loss(sde_out , pan.squeeze(0))
-                                    
-
-                
-                # 光谱损失 (与train_or.py中的loss3对应)
-                loss_spec = loss_calculator.compute_spectral_loss(
-                    fusion_out_hw_c, 
-                    ms.permute(1, 2, 0)
-                )
-                
-                # 总损失 (使用train_or.py中的权重)
-                total_loss = w_var * loss_var + w_spa * loss_spa + w_spec * loss_spec
-                
-                # 标准反向传播和优化步骤
-                total_loss.backward()
-                optimizer.step()
-          
-            # 记录各损失值
-            epoch_loss_var.append(loss_var.item())
-            epoch_loss_spa.append(loss_spa.item())
-            epoch_loss_spec.append(loss_spec.item())
-            
         # 计算平均损失
-        avg_loss_var = np.mean(epoch_loss_var)
-        avg_loss_spa = np.mean(epoch_loss_spa)
-        avg_loss_spec = np.mean(epoch_loss_spec)
-        avg_total_loss = w_var * avg_loss_var + w_spa * avg_loss_spa + w_spec * avg_loss_spec
-        
-        # 采用train_or.py的输出频率：每50个epoch输出一次
-        if epoch % 50 == 0 or epoch == epochs:
+        if use_reduced_epoch:
+            avg_loss_red = np.mean(epoch_loss_red)
+            avg_total_loss = reduced_loss_weight * avg_loss_red
+        else:
+            avg_loss_var = np.mean(epoch_loss_var)
+            avg_loss_spa = np.mean(epoch_loss_spa)
+            avg_loss_spec = np.mean(epoch_loss_spec)
+            avg_total_loss = w_var * avg_loss_var + w_spa * avg_loss_spa + w_spec * avg_loss_spec
+
+        # 输出损失
+        if use_reduced_epoch:
+            print(f"Epoch [{epoch}/{epochs}] [REDUCED] - Loss_gt: {avg_loss_red:.6f}, "
+                  f"Total Loss: {avg_total_loss:.6f}")
+        elif epoch % 50 == 0 or epoch == epochs:
             print(f"Epoch [{epoch}/{epochs}] - Loss1(var): {avg_loss_var:.6f}, "
-                f"Loss2(fspta): {avg_loss_spa:.6f}, Loss3(fspec): {avg_loss_spec:.6f}, "
-                f"Total Loss: {avg_total_loss:.6f}")
+                  f"Loss2(fspta): {avg_loss_spa:.6f}, Loss3(fspec): {avg_loss_spec:.6f}, "
+                  f"Total Loss: {avg_total_loss:.6f}")
         
         # 保存最佳模型
         if avg_total_loss < min_total_loss:
@@ -302,6 +359,28 @@ def main():
         pin_memory=True,
         drop_last=True
     )
+
+    # reduced 数据加载（预构造文件，避免每次训练重新降采样）
+    reduced_loader = None
+    if use_reduced:
+        if os.path.exists(reduced_data_path):
+            try:
+                reduced_set = ReducedDataset(reduced_data_path, data_id)
+                reduced_loader = DataLoader(
+                    dataset=reduced_set,
+                    batch_size=batch_size,
+                    shuffle=True,
+                    num_workers=0,
+                    pin_memory=True,
+                    drop_last=True
+                )
+                print(f"已加载reduced数据: {reduced_data_path} (每{reduced_every}个epoch训练一次)")
+            except Exception as e:
+                print(f"加载reduced数据失败: {str(e)}，本次仅使用full数据训练")
+                reduced_loader = None
+        else:
+            print(f"警告: reduced数据文件不存在: {reduced_data_path}")
+            print("请先运行 prepare_reduced_data.py 构造数据，本次仅使用full数据训练")
     
     # 模型标识（如果使用混合精度，则添加amp标记）
     identifier = f"{sensor}_{data_id}_FusionNet_SDE" 
@@ -311,7 +390,7 @@ def main():
     print(f"成功导入教师模型输出: {teacher_mat_path}")
 
     # 开始训练
-    train(train_loader, identifier, teacher_output)
+    train(train_loader, reduced_loader, identifier, teacher_output)
 
 # 执行主函数
 if __name__ == "__main__":

@@ -8,11 +8,11 @@
 - `zup/`：模型训练与测试代码（含 loss landscape 可视化等）
 
 
-## Reduced 数据增强训练（zup/trainba.py）
+## Reduced 数据增强训练（zup/trainba.py / zup/train_SDE.py）
 
 - 先用 `zup/prepare_reduced_data.py` 用 Wald 降采样协议提前构造 reduced 仿真数据（存为 `*_reduced.h5`，避免每次训练重复构造）。
-- `trainba.py` 每 `--reduced_every` 个 epoch 用一次 reduced 数据训练：reduced 数据用 gt（原始低分辨率 ms）构造损失，full 数据保持原有蒸馏+空间+光谱损失。
-- 常用参数：`--use_reduced 1 --reduced_every 10 --reduced_loss_weight 1.0`。
+- `trainba.py` 与 `train_SDE.py` 每 `--reduced_every` 个 epoch 用一次 reduced 数据训练：reduced 数据用 gt（原始低分辨率 ms）构造损失，full 数据保持原有蒸馏+空间+光谱损失。
+- 常用参数：`--use_reduced 1 --reduced_every 10 --reduced_loss_weight 1.0`（runba 的 process_model=0/1 均透传）。
 
 ## 运行方法
 
@@ -40,7 +40,7 @@ WALD_DEVICE=cuda:0 python trainba.py --data_id 0 \
 ### 3. 通过 runba.py 走完整流程（训练 + 测试）
 
 ```bash
-WALD_DEVICE=cuda:0 python runba.py --process_model 0 --data_id 0 \
+WALD_DEVICE=cuda:0 python runba.py --process_model 0 \
   --data_path /media/zouhe/Elements/Data/PanCollection/test_data/test_wv3_OrigScale_multiExm1.h5 \
   --epochs 240 --reduced_every 10 --device cuda:0
 ```
