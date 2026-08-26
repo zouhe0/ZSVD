@@ -30,7 +30,7 @@ def process_single_image(data_id, args):
                 F"--data_path={args.data_path}",
                 f"--use_reduced={args.use_reduced}",
                 f"--reduced_data_path={args.reduced_data_path}",
-                f"--reduced_every={args.reduced_every}",
+                f"--reduced_ratio={args.reduced_ratio}",
                 f"--reduced_loss_weight={args.reduced_loss_weight}"
             ]
             print(f"执行命令: {' '.join(train_cmd)}")
@@ -89,7 +89,7 @@ def process_single_image(data_id, args):
                 f"--data_path={args.data_path}",
                 f"--use_reduced={args.use_reduced}",
                 f"--reduced_data_path={args.reduced_data_path}",
-                f"--reduced_every={args.reduced_every}",
+                f"--reduced_ratio={args.reduced_ratio}",
                 f"--reduced_loss_weight={args.reduced_loss_weight}"
                 ]
         
@@ -177,7 +177,7 @@ def main():
     parser.add_argument("--mode",type=str, default="normal", choices=["normal", "reduce"], help="模式")
     parser.add_argument("--use_reduced", type=int, default=1, choices=[0, 1], help="是否启用reduced数据训练(0/1)")
     parser.add_argument("--reduced_data_path", type=str, default=None, help="预构造的reduced数据h5路径(默认<data_path>_reduced.h5)")
-    parser.add_argument("--reduced_every", type=int, default=10, help="每N个epoch训练一次reduced数据(默认10, 即10%)")
+    parser.add_argument("--reduced_ratio", type=float, default=10.0, help="reduced数据比例(0~100): 0=纯full(无监督), 100=纯reduced(有监督), 默认10")
     parser.add_argument("--reduced_loss_weight", type=float, default=1.0, help="reduced数据gt损失权重")
     args = parser.parse_args()
     

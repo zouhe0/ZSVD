@@ -45,8 +45,8 @@ parser.add_argument("--use_reduced", type=int, default=1, choices=[0, 1],
                     help="是否启用reduced数据训练 (1启用, 0禁用)")
 parser.add_argument("--reduced_data_path", type=str, default=None,
                     help="预构造的reduced数据h5路径，默认: <data_path>去掉.h5加_reduced.h5")
-parser.add_argument("--reduced_every", type=int, default=10,
-                    help="每N个epoch训练一次reduced数据 (默认10, 即10%)")
+parser.add_argument("--reduced_ratio", type=float, default=10.0,
+                    help="reduced数据比例(0~100): 0=纯full(无监督), 100=纯reduced(有监督), 默认10")
 parser.add_argument("--reduced_loss_weight", type=float, default=1.0,
                     help="reduced数据gt损失的权重")
 args = parser.parse_args()
@@ -79,7 +79,7 @@ data_path = args.data_path
 
 # reduced 数据相关设置
 use_reduced = bool(args.use_reduced)
-reduced_every = args.reduced_every
+reduced_ratio = max(0.0, min(100.0, float(args.reduced_ratio)))
 reduced_loss_weight = args.reduced_loss_weight
 if args.reduced_data_path and args.reduced_data_path != 'None':
     reduced_data_path = args.reduced_data_path
@@ -142,8 +142,12 @@ def train(training_data_loader, reduced_data_loader, identifier, teacher_output)
         epoch_total_loss = []
         epoch_loss_var, epoch_loss_spa, epoch_loss_spec, epoch_loss_red = [], [], [], []
 
-        # reduced 数据轮次: 每 reduced_every 个 epoch 用一次 reduced 数据训练
-        use_reduced_epoch = (reduced_data_loader is not None) and (epoch % reduced_every == 0)
+        # reduced 混合比例(0~100): 0 → 纯full(无监督)，100 → 纯reduced(有监督)
+        # 将 reduced 轮次按比例均匀分布到整个训练过程
+        target_count = int(round(epochs * reduced_ratio / 100.0))
+        prev_red = ((epoch - 1) * target_count) // epochs
+        cur_red = (epoch * target_count) // epochs
+        use_reduced_epoch = (reduced_data_loader is not None) and (cur_red > prev_red)
 
         if use_reduced_epoch:
             # ---------- reduced 数据: 用 gt 构造损失 ----------
@@ -374,7 +378,7 @@ def main():
                     pin_memory=True,
                     drop_last=True
                 )
-                print(f"已加载reduced数据: {reduced_data_path} (每{reduced_every}个epoch训练一次)")
+                print(f"已加载reduced数据: {reduced_data_path} (reduced比例: {reduced_ratio:.0f}%)")
             except Exception as e:
                 print(f"加载reduced数据失败: {str(e)}，本次仅使用full数据训练")
                 reduced_loader = None
