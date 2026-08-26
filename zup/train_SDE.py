@@ -75,7 +75,7 @@ data_path = args.data_path
 # =================== 模型初始化 =================== #
 # 学生模型 (FusionNet)
 model_student = FusionNet().to(device)
-model_student.load_state_dict(torch.load(f'model_pretrain/{sensor}/{data_id}_FusionNet_pretrain.pth'))
+# 一阶段训练：直接从随机初始化训练融合网络，不加载model_pretrain预热权重
 print("学生模型初始化完成")
 
 # 损失计算器初始化

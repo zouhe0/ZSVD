@@ -56,33 +56,15 @@ def process_single_image(data_id, args):
                 f"--data_path={args.data_path}",
 
             ]
-            pre_train_cmd = [   
-                sys.executable,  # 当前Python解释器
-                "pretrain.py",
-                f"--lr={args.pre_lr}",
-                f"--epochs={args.pre_epochs}",
-                f"--data_id={data_id}",
-                f"--sensor={args.sensor}",
-                f"--device={args.device}",
-                f"--ratio={args.ratio}",
-                f"--temperature={args.temperature}",
-                f"--data_path={args.data_path}"
-
-            ]
+            print(f"执行命令: {' '.join(SDE_train_cmd)}")
             
-
-            print(f"执行命令: {' '.join(SDE_train_cmd)} 和 {' '.join(pre_train_cmd)}")
-            
-            # 以非阻塞方式启动 SDE 和 Pretrain
-            pretrain_process = subprocess.Popen(pre_train_cmd)
+            # 一阶段训练：不再在reduced上预热，直接训练融合网络；仅需先训练SDE模块
             SDE_process = subprocess.Popen(SDE_train_cmd)
 
-
-            # 等待两个进程都完成 
+            # 等待 SDE 训练完成
             SDE_process.wait()
-            pretrain_process.wait()
 
-            print("SDE网络和预训练任务均已完成，开始SDE训练")
+            print("SDE网络训练完成，开始直接训练融合网络")
             #print(f"执行命令: {' '.join(SDE_train_cmd)}")
             #try:
             #    SDE_train_result = subprocess.run(SDE_train_cmd, check=True)
@@ -189,8 +171,6 @@ def main():
     parser.add_argument("--start_id", type=int, default=0, help="起始数据ID (用于process_all)")
     parser.add_argument("--end_id", type=int, default=19, help="结束数据ID (用于process_all)")
     parser.add_argument("--alfa",type=float, default=0.15, help="U2Net蒸馏模型融合参数")
-    parser.add_argument("--pre_epochs",type=int, default=8, help="预训练轮数")
-    parser.add_argument("--pre_lr",type=float, default=0.015, help="预训练学习率")#0.15
     parser.add_argument("--mode",type=str, default="normal", choices=["normal", "reduce"], help="模式")
     parser.add_argument("--use_reduced", type=int, default=1, choices=[0, 1], help="是否启用reduced数据训练(0/1)")
     parser.add_argument("--reduced_data_path", type=str, default=None, help="预构造的reduced数据h5路径(默认<data_path>_reduced.h5)")
