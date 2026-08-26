@@ -45,4 +45,7 @@ WALD_DEVICE=cuda:0 python runba.py --process_model 0 --data_id 0 \
   --epochs 240 --reduced_every 10 --device cuda:0
 ```
 
+> 教师模型输出直接来自 FusionMamba_2024 的 `results/WV3_full/output_mulExm_*.mat`（不再加载教师网络），可用环境变量 `TEACHER_RESULT_DIR` 覆盖目录。
+> 一阶段训练：`runba.py` 的 `process_model=1` 流程已去掉 `pretrain.py`（reduced 预热）阶段，`train_SDE.py` 直接从随机初始化训练融合网络，不再加载 `model_pretrain` 权重。
+
 > 说明：模型权重、数据集、conda 环境与第三方仓库（DLPan-Toolbox、Vim）未纳入本仓库。
