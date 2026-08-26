@@ -42,7 +42,7 @@ WALD_DEVICE=cuda:0 python trainba.py --data_id 0 \
 ```bash
 WALD_DEVICE=cuda:0 python runba.py --process_model 1 \
   --data_path /media/zouhe/Elements/Data/PanCollection/test_data/test_wv3_OrigScale_multiExm1.h5 \
-  --epochs 240 --reduced_ratio 0 --device cuda:0
+  --epochs 240 --reduced_ratio 50 --device cuda:0
 ```
 
 > 教师模型输出直接来自 FusionMamba_2024 的 `results/WV3_full/output_mulExm_*.mat`（不再加载教师网络），可用环境变量 `TEACHER_RESULT_DIR` 覆盖目录。
