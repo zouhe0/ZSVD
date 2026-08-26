@@ -76,3 +76,30 @@ class Dataset(data.Dataset):
 
     def __len__(self):
         return 1
+
+class ReducedDataset(data.Dataset):
+    """预构造的 reduced 仿真数据
+    文件由 prepare_reduced_data.py 生成，包含 lms/pan（Wald 降采样后）与 gt（原始低分辨率 ms）。
+    """
+    def __init__(self, file_path, name):
+        super(ReducedDataset, self).__init__()
+
+        dataset = h5py.File(file_path, 'r')
+
+        lms = np.array(dataset['lms'][name], dtype=np.float32) / 2047.0
+        pan = np.array(dataset['pan'][name], dtype=np.float32) / 2047.0
+        gt = np.array(dataset['gt'][name], dtype=np.float32) / 2047.0
+
+        lms = torch.from_numpy(lms).float()
+        pan = torch.from_numpy(pan).float()
+        gt = torch.from_numpy(gt).float()
+
+        self.lms_crops = lms
+        self.pan_crops = pan
+        self.gt_crops = gt
+
+    def __getitem__(self, item):
+        return self.lms_crops, self.pan_crops, self.gt_crops
+
+    def __len__(self):
+        return 1

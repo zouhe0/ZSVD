@@ -1,10 +1,14 @@
+import os
 import numpy as np
 import torch
 import torch.nn as nn
 import math
 import scipy.ndimage.filters as ft
-torch.cuda.set_device(2)                     # 0 就是上面暴露的唯一显卡
-device = torch.device('cuda:2')
+
+# 设备可通过环境变量 WALD_DEVICE 指定（默认 cuda:2，与原代码一致）
+_WALD_DEVICE = os.environ.get('WALD_DEVICE', 'cuda:2')
+torch.cuda.set_device(_WALD_DEVICE)
+device = torch.device(_WALD_DEVICE)
 
 def fspecial_gauss(size, sigma):
     # Function to mimic the 'fspecial' gaussian MATLAB function
@@ -196,7 +200,7 @@ def wald_protocol_v1(ms, pan, ratio, sensor, channels=8):
 
         MTF_kern = np.moveaxis(mtf_kernel, -1, 0)
         MTF_kern = np.expand_dims(MTF_kern, axis=1)
-        MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).cuda(2)
+        MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).to(_WALD_DEVICE)
 
         # DepthWise-Conv2d definition
         depthconv = nn.Conv2d(in_channels=channels,
@@ -205,7 +209,7 @@ def wald_protocol_v1(ms, pan, ratio, sensor, channels=8):
                               groups=channels,
                               padding=20,
                               padding_mode='replicate',
-                              bias=False).cuda(2)
+                              bias=False).to(_WALD_DEVICE)
 
         depthconv.weight.data = MTF_kern
         depthconv.weight.requires_grad = False
@@ -226,7 +230,7 @@ def wald_protocol_v1(ms, pan, ratio, sensor, channels=8):
 
         MTF_kern = np.moveaxis(mtf_kernel, -1, 0)
         MTF_kern = np.expand_dims(MTF_kern, axis=1)
-        MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).cuda()
+        MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).to(_WALD_DEVICE)
 
         # DepthWise-Conv2d definition
         depthconv = nn.Conv2d(in_channels=channels,
@@ -235,7 +239,7 @@ def wald_protocol_v1(ms, pan, ratio, sensor, channels=8):
                               groups=channels,
                               padding=20,
                               padding_mode='replicate',
-                              bias=False)
+                              bias=False).to(_WALD_DEVICE)
 
         depthconv.weight.data = MTF_kern
         depthconv.weight.requires_grad = False
@@ -254,7 +258,7 @@ def wald_protocol_v2(ms, pan, ratio, sensor, channels=8):
 
         MTF_kern = np.moveaxis(mtf_kernel, -1, 0)
         MTF_kern = np.expand_dims(MTF_kern, axis=1)
-        MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).cuda()
+        MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).to(_WALD_DEVICE)
 
         # DepthWise-Conv2d definition
         depthconv = nn.Conv2d(in_channels=channels,
@@ -283,7 +287,7 @@ def wald_protocol_v2(ms, pan, ratio, sensor, channels=8):
 
         MTF_kern = np.moveaxis(mtf_kernel, -1, 0)
         MTF_kern = np.expand_dims(MTF_kern, axis=1)
-        MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).cuda()
+        MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).to(_WALD_DEVICE)
 
         # DepthWise-Conv2d definition
         depthconv = nn.Conv2d(in_channels=channels,
@@ -310,7 +314,7 @@ def MTF(ms, sensor, ratio, channels):
 
     MTF_kern = np.moveaxis(mtf_kernel, -1, 0)
     MTF_kern = np.expand_dims(MTF_kern, axis=1)
-    MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).to('cuda')
+    MTF_kern = torch.from_numpy(MTF_kern).type(torch.float32).to(_WALD_DEVICE)
     #MTF_kern = torch.tile(MTF_kern, (channels, 1, 1, 1))
 
     # DepthWise-Conv2d definition

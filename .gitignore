@@ -2,6 +2,7 @@
 miniconda3/
 PanCollection/
 test_*.h5
+*_reduced.h5
 .vscode/
 
 # ===== 已存在于 GitHub 的公开仓库（无需重复上传） =====
