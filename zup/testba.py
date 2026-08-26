@@ -9,7 +9,7 @@ import sys
 import time
 from mymodel import FusionNet  # 学生模型
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'FusionMamba'))
-from model.u2net import U2Net  # 教师模型
+
 
 def tensor_to_image(tensor):
     """
