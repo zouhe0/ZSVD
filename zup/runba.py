@@ -4,6 +4,8 @@ import os
 import time
 import sys
 
+"this is test for mix"
+
 def process_single_image(data_id, args):
     """处理单张图片的训练和测试"""
     image_start_time = time.time()
