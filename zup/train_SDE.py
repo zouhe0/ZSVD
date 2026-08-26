@@ -15,11 +15,9 @@ from torch.cuda.amp import autocast, GradScaler
 from data import Dataset  # 数据加载器
 from mymodel import FusionNet  # 学生模型
 from SDE import Net_ms2pan_dual,sobel_filter,ms2pan_convNet_dual  # SDE模块
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'FusionMamba'))
 print("Updated sys.path:", sys.path)
-# 修改导入：使用U2Net作为教师模型
-from model.u2net import U2Net
 from loss import LossCalculator  # 损失计算器
+from teacher_output_loader import load_teacher_output  # 教师输出直接来自FusionMamba_2024结果文件
 from wald_utilities import wald_protocol_v1, wald_protocol_v2  # 学生模型
 
 # ================== 基础设置 =================== #
@@ -73,7 +71,6 @@ data_path = args.data_path
 
 
 # U2Net预训练模型路径
-u2net_path = r"/HardDisk/HeZou/zup/FusionMamba/weights/420.pth"
 
 # =================== 模型初始化 =================== #
 # 学生模型 (FusionNet)
@@ -93,29 +90,7 @@ F_ms2pan.eval()
 optimizer = optim.Adam(model_student.parameters(), lr=lr, betas=(0.9, 0.999))
 
 
-# 教师模型 (U2Net)
-try:
-    # 设定U2Net输入参数
-    model_teacher = U2Net(
-        dim=32,      # 特征维度
-        pan_dim=1,   # 全色图像通道数
-        ms_dim=8,    # 多光谱图像通道数
-        H=512,       # 与pan图像尺寸一致
-        W=512        # 与pan图像尺寸一致
-    ).to(device)
-    
-    checkpoint = torch.load(u2net_path, map_location=device)
-    if 'state_dict' in checkpoint:
-        model_teacher.load_state_dict(checkpoint['state_dict'])
-    else:
-        model_teacher.load_state_dict(checkpoint)
-        
-    model_teacher.eval()  # 固定教师模型参数
-    print(f"成功加载U2Net预训练模型: {u2net_path}")
-except Exception as e:
-    print(f"加载U2Net模型失败: {str(e)}")
-    print("请确保模型结构和权重文件正确")
-    exit(1)
+# 教师模型输出直接来自FusionMamba_2024结果文件（不加载教师网络）
 
 
 
@@ -135,47 +110,12 @@ def save_checkpoint(model, identifier):
     model_out_path = os.path.join("model_FUG", f"{identifier}.pth")
     torch.save(model.state_dict(), model_out_path)
 
-# 在训练前预先计算所有批次的教师模型输出
-def precompute_teacher_outputs(data_loader, teacher_model):
-    print("预计算教师模型输出...")
-    teacher_outputs = []
-    
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(data_loader):
-            ms, lms, pan = batch[0].to(device), batch[1].to(device), batch[2].to(device)
-            # 确保pan维度正确
-            if len(pan.shape) == 3:
-                pan = pan.unsqueeze(1)
-                
-            try:
-                # 对教师模型预计算也使用混合精度（如果启用）
-                if use_amp:
-                    with autocast():
-                        # 注意：U2Net的输入顺序是(ms, pan)，与LACNET不同
-                        output = teacher_model(ms, pan)
-                else:
-                    output = teacher_model(ms, pan)
-                
-                # 如果输出为元组，取第一个元素
-                if isinstance(output, tuple):
-                    output = output[0]
-                    
-                teacher_outputs.append(output.cpu())  # 存储到CPU内存以节省GPU内存
-            except Exception as e:
-                print(f"批次 {batch_idx} 预计算失败: {str(e)}")
-                # 如果处理失败，添加None，稍后处理
-                teacher_outputs.append(None)
-    
-    valid_count = sum(1 for out in teacher_outputs if out is not None)
-    print(f"预计算完成，共 {valid_count}/{len(teacher_outputs)} 个有效样本")
-    return teacher_outputs
-
 # ================ 知识蒸馏训练过程 ================ #
-def train(training_data_loader, identifier):
+def train(training_data_loader, identifier, teacher_output):
     print("开始知识蒸馏训练...")
     
-    # 预计算教师模型输出
-    teacher_outputs = precompute_teacher_outputs(training_data_loader, model_teacher)
+    # 教师输出直接来自FusionMamba_2024结果文件（不运行教师网络）
+    teacher_outputs = [teacher_output]
     
     min_total_loss = float("inf")
     start_time = time.time()
@@ -366,8 +306,12 @@ def main():
     # 模型标识（如果使用混合精度，则添加amp标记）
     identifier = f"{sensor}_{data_id}_FusionNet_SDE" 
     
+    # 导入教师模型输出（来自FusionMamba_2024 results/WV3_full，不加载教师网络）
+    teacher_output, teacher_mat_path = load_teacher_output(data_id, device)
+    print(f"成功导入教师模型输出: {teacher_mat_path}")
+
     # 开始训练
-    train(train_loader, identifier)
+    train(train_loader, identifier, teacher_output)
 
 # 执行主函数
 if __name__ == "__main__":
