@@ -134,7 +134,12 @@ def train(training_data_loader, reduced_data_loader, identifier, teacher_output)
     # 教师输出直接来自FusionMamba_2024结果文件（不运行教师网络）
     teacher_outputs = [teacher_output]
     
-    min_total_loss = float("inf")
+    min_full_loss = float("inf")
+    min_red_loss = float("inf")
+    full_log_interval = 10  # full 损失每隔 10 个 epoch 打印一次
+    target_count = int(round(epochs * reduced_ratio / 100.0))
+    reduced_log_interval = min(full_log_interval, max(1, target_count))  # reduced 每隔 min(10, epochs*reduced比例) 个 epoch 打印一次
+    last_full_log = None  # (epoch, var, spa, spec, total)：最近一个 full 轮的损失，供 reduced 轮打印 full 损失
     start_time = time.time()
 
     for epoch in range(1, epochs + 1):
@@ -330,25 +335,45 @@ def train(training_data_loader, reduced_data_loader, identifier, teacher_output)
             avg_total_loss = w_var * avg_loss_var + w_spa * avg_loss_spa + w_spec * avg_loss_spec
 
         # 输出损失
+        # full 损失每隔 full_log_interval(10) 个 epoch 打印一次；若该轮是 reduced 轮，
+        # 则打印最近一个 full 轮的损失；reduced 损失每隔 reduced_log_interval 个 epoch 打印一次
         if use_reduced_epoch:
-            print(f"Epoch [{epoch}/{epochs}] [REDUCED] - Loss_gt: {avg_loss_red:.6f}, "
-                  f"Total Loss: {avg_total_loss:.6f}")
-        elif epoch % 50 == 0 or epoch == epochs:
-            print(f"Epoch [{epoch}/{epochs}] - Loss1(var): {avg_loss_var:.6f}, "
-                  f"Loss2(fspta): {avg_loss_spa:.6f}, Loss3(fspec): {avg_loss_spec:.6f}, "
-                  f"Total Loss: {avg_total_loss:.6f}")
+            if epoch % reduced_log_interval == 0 or epoch == epochs:
+                print(f"Epoch [{epoch}/{epochs}] [REDUCED] - Loss_gt: {avg_loss_red:.6f}, "
+                      f"Total Loss: {avg_total_loss:.6f}")
+                if last_full_log is not None and (epoch % full_log_interval == 0 or epoch == epochs):
+                    le, lv, ls, lsp, lt = last_full_log
+                    print(f"Epoch [{epoch}/{epochs}] (full@epoch {le}) - Loss1(var): {lv:.6f}, "
+                          f"Loss2(fspta): {ls:.6f}, Loss3(fspec): {lsp:.6f}, "
+                          f"Total Loss: {lt:.6f}")
+        else:
+            last_full_log = (epoch, avg_loss_var, avg_loss_spa, avg_loss_spec, avg_total_loss)
+            if epoch % full_log_interval == 0 or epoch == epochs:
+                print(f"Epoch [{epoch}/{epochs}] - Loss1(var): {avg_loss_var:.6f}, "
+                      f"Loss2(fspta): {avg_loss_spa:.6f}, Loss3(fspec): {avg_loss_spec:.6f}, "
+                      f"Total Loss: {avg_total_loss:.6f}")
         
         # 保存最佳模型
-        if avg_total_loss < min_total_loss:
-            min_total_loss = avg_total_loss
-            save_checkpoint(model_student, f"{identifier}_best")
+        # full 与 reduced 的总损失量级相差约 7 个数量级，不能混在一起比较；
+        # 否则 reduced 轮会永远刷新 best，存下"刚被 reduced 推离 full 最优方向"的模型。
+        # best 只按 full 轮损失选择；纯 reduced 训练（无 full 轮）时按 reduced 损失兜底。
+        if use_reduced_epoch:
+            if avg_total_loss < min_red_loss:
+                min_red_loss = avg_total_loss
+                if min_full_loss == float("inf"):
+                    save_checkpoint(model_student, f"{identifier}_best")
+        else:
+            if avg_total_loss < min_full_loss:
+                min_full_loss = avg_total_loss
+                save_checkpoint(model_student, f"{identifier}_best")
         
 
     
     # 训练完成
     total_time = time.time() - start_time
     print(f"训练完成，总耗时 {total_time:.2f} 秒")
-    print(f"最终最佳损失: {min_total_loss:.6f}")
+    print(f"最终最佳损失(full): {min_full_loss:.6f}")
+    print(f"最终最佳损失(reduced): {min_red_loss:.6f}")
     print(f"模型已保存至: {identifier}_best.pth")
 
 # ================ 主函数 ================ #

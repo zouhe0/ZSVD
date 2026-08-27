@@ -84,30 +84,7 @@ def main():
     
     model_student.eval()
     
-    # --------------------- 加载教师模型 ---------------------
-    print("正在加载教师模型...")
-    try:
-        # 初始化U2Net时使用实际图像尺寸
-        model_teacher = U2Net(
-            dim=32,      # 特征维度
-            pan_dim=1,   # 全色图像通道数
-            ms_dim=8,    # 多光谱图像通道数
-            H=512,  # 使用实际图像高度
-            W=512    # 使用实际图像宽度
-        ).to(device)
-        
-        checkpoint = torch.load(args.u2net_path, map_location=device)
-        if 'state_dict' in checkpoint:
-            model_teacher.load_state_dict(checkpoint['state_dict'])
-        else:
-            model_teacher.load_state_dict(checkpoint)
-        
-        model_teacher.eval()
-        print(f"成功加载教师模型: {args.u2net_path}")
-    except Exception as e:
-        print(f"加载教师模型失败: {str(e)}")
-        print("继续使用学生模型进行测试...")
-        model_teacher = None
+  
     
     # --------------------- 学生模型推理 ---------------------
     print("正在执行学生模型推理...")
@@ -120,15 +97,15 @@ def main():
         print(f"学生模型推理用时: {end_time - start_time:.3f} s")
         fused_student = fused_student.squeeze(0)  # [C,H,W]
         
-        # 教师模型推理（如果可用）
-        if model_teacher is not None:
-            print("正在执行教师模型推理（保持原始分辨率）...")
-            # 直接使用原始尺寸进行推理,无需下采样和上采样
-            teacher_out = model_teacher(ms_batch, pan_batch)
-            if isinstance(teacher_out, tuple):
-                teacher_out = teacher_out[0]
+        # # 教师模型推理（如果可用）
+        # if model_teacher is not None:
+        #     print("正在执行教师模型推理（保持原始分辨率）...")
+        #     # 直接使用原始尺寸进行推理,无需下采样和上采样
+        #     teacher_out = model_teacher(ms_batch, pan_batch)
+        #     if isinstance(teacher_out, tuple):
+        #         teacher_out = teacher_out[0]
                 
-            fused_teacher = teacher_out.squeeze(0)  # [C,H,W]
+        #     fused_teacher = teacher_out.squeeze(0)  # [C,H,W]
     
     # --------------------- 转换为图片格式 ---------------------
     lms_img = tensor_to_image(lms)  # 原始上采样多光谱图像
@@ -159,12 +136,12 @@ def main():
         plt.title("Student Model Fusion")
         plt.axis("off")
         
-        if model_teacher is not None:
-            fused_teacher_img = tensor_to_image(fused_teacher)
-            plt.subplot(1, 4, 4)
-            plt.imshow(fused_teacher_img)
-            plt.title("Teacher Model Fusion")
-            plt.axis("off")
+        # if model_teacher is not None:
+        #     fused_teacher_img = tensor_to_image(fused_teacher)
+        #     plt.subplot(1, 4, 4)
+        #     plt.imshow(fused_teacher_img)
+        #     plt.title("Teacher Model Fusion")
+        #     plt.axis("off")
         
         plt.tight_layout()
         plt.show()
@@ -194,18 +171,18 @@ def main():
         sio.savemat(student_save_path, student_dict)
         print(f"学生模型结果已保存至: {student_save_path}")
 
-        # 如果教师模型可用,也保存其结果
-        if model_teacher is not None:
-            I_teacher = torch.squeeze(fused_teacher).permute(1, 2, 0).cpu().detach().numpy() * 2047  # 教师模型融合结果
-            teacher_dict = {
-                'I_MS_LR': I_MS_LR,
-                'I_MS': I_MS,
-                'I_PAN': I_PAN,
-                'proposed': I_teacher  # 使用'proposed'作为教师模型输出的键名
-            }
-            teacher_save_path = os.path.join("result", args.satellite,f"{args.data_id}_teacher.mat")
-            sio.savemat(teacher_save_path, teacher_dict)
-            print(f"教师模型结果已保存至: {teacher_save_path}")
+        # # 如果教师模型可用,也保存其结果
+        # if model_teacher is not None:
+        #     I_teacher = torch.squeeze(fused_teacher).permute(1, 2, 0).cpu().detach().numpy() * 2047  # 教师模型融合结果
+        #     teacher_dict = {
+        #         'I_MS_LR': I_MS_LR,
+        #         'I_MS': I_MS,
+        #         'I_PAN': I_PAN,
+        #         'proposed': I_teacher  # 使用'proposed'作为教师模型输出的键名
+        #     }
+        #     teacher_save_path = os.path.join("result", args.satellite,f"{args.data_id}_teacher.mat")
+        #     sio.savemat(teacher_save_path, teacher_dict)
+        #     print(f"教师模型结果已保存至: {teacher_save_path}")
 
     elif args.mode == "reduce":
         # Matlab评测兼容模式
@@ -253,21 +230,21 @@ def main():
         sio.savemat(student_reduce_path, student_reduce_dict)
         print(f"学生模型评测数据已保存至: {student_reduce_path}")
         
-        # 如果教师模型可用,也保存其评测数据
-        if model_teacher is not None:
-            I_teacher = torch.squeeze(fused_teacher).permute(1, 2, 0).cpu().detach().numpy() * 2047
-            teacher_reduce_dict = {
-                'gt': gt_data,              # 地面真实值
-                'proposed': I_teacher,      # 教师模型融合结果
-                'ms': I_MS_LR,              # 低分辨率多光谱图像
-                'pan': I_PAN,               # 全色图像
-                'ratio': 4,                 # 下采样比例
-                'sensor_type': args.sensor_type  # 传感器类型
-            }
+        # # 如果教师模型可用,也保存其评测数据
+        # if model_teacher is not None:
+        #     I_teacher = torch.squeeze(fused_teacher).permute(1, 2, 0).cpu().detach().numpy() * 2047
+        #     teacher_reduce_dict = {
+        #         'gt': gt_data,              # 地面真实值
+        #         'proposed': I_teacher,      # 教师模型融合结果
+        #         'ms': I_MS_LR,              # 低分辨率多光谱图像
+        #         'pan': I_PAN,               # 全色图像
+        #         'ratio': 4,                 # 下采样比例
+        #         'sensor_type': args.sensor_type  # 传感器类型
+        #     }
             
-            teacher_reduce_path = os.path.join("reduce_result", args.satellite, f"{args.data_id}_teacher.mat")
-            sio.savemat(teacher_reduce_path, teacher_reduce_dict)
-            print(f"教师模型评测数据已保存至: {teacher_reduce_path}")
+            # teacher_reduce_path = os.path.join("reduce_result", args.satellite, f"{args.data_id}_teacher.mat")
+            # sio.savemat(teacher_reduce_path, teacher_reduce_dict)
+            # print(f"教师模型评测数据已保存至: {teacher_reduce_path}")
 
     print("处理完成！")
 

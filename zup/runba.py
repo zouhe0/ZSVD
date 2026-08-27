@@ -178,7 +178,7 @@ def main():
     parser.add_argument("--use_reduced", type=int, default=1, choices=[0, 1], help="是否启用reduced数据训练(0/1)")
     parser.add_argument("--reduced_data_path", type=str, default=None, help="预构造的reduced数据h5路径(默认<data_path>_reduced.h5)")
     parser.add_argument("--reduced_ratio", type=float, default=10.0, help="reduced数据比例(0~100): 0=纯full(无监督), 100=纯reduced(有监督), 默认10")
-    parser.add_argument("--reduced_loss_weight", type=float, default=1.0, help="reduced数据gt损失权重")
+    parser.add_argument("--reduced_loss_weight", type=float, default=10000.0, help="reduced数据gt损失权重")
     args = parser.parse_args()
     
     
