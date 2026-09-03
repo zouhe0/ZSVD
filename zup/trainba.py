@@ -11,7 +11,7 @@ import sys
 from data import Dataset  # 数据加载器
 from mymodel import FusionNet  # 学生模型
 from loss import LossCalculator  # 损失计算器
-from teacher_output_loader import load_teacher_output  # 教师输出直接来自FusionMamba_2024结果文件
+from teacher_output_loader import load_teacher_model, load_teacher_output
 
 # ================== 基础设置 =================== #
 SEED = 10
@@ -32,6 +32,9 @@ parser.add_argument("--ratio", type=int, default=4, help="下采样比例")
 parser.add_argument("--temperature", type=float, default=1.0, help="蒸馏温度参数")
 parser.add_argument("--alfa", type=float, default=0.15, help="损失权重")
 parser.add_argument("--data_path", type=str, default='/HardDisk/HeZou/test_wv3_OrigScale_multiExm1.h5', help="数据文件路径")
+parser.add_argument("--teacher_source", type=str, default="mat", choices=["mat", "model"], help="教师输出来源")
+parser.add_argument("--teacher_result_dir", type=str, default=None, help="MAT教师输出目录")
+parser.add_argument("--u2net_path", type=str, default="FusionMamba/weights/420.pth", help="U2Net预训练模型路径")
 args = parser.parse_args()
 
 lr = args.lr
@@ -63,8 +66,6 @@ data_path = args.data_path
 model_student = FusionNet().to(device)
 print("学生模型初始化完成")
 
-# 教师模型输出直接来自FusionMamba_2024结果文件（不加载教师网络）
-
 # 损失计算器初始化
 loss_calculator = LossCalculator(sensor=sensor, ratio=ratio, N=41, device=device)
 
@@ -77,15 +78,44 @@ def save_checkpoint(model, identifier):
     model_out_path = os.path.join("model_FUG", f"{identifier}.pth")
     torch.save(model.state_dict(), model_out_path)
 
+# 在训练前准备教师模型输出
+def prepare_teacher_outputs(training_data_loader):
+    if args.teacher_source == "mat":
+        expected_shape = next(iter(training_data_loader))[1].shape
+        teacher_output, teacher_mat_path = load_teacher_output(
+            data_id,
+            device,
+            args.teacher_result_dir,
+            expected_shape
+        )
+        print(f"成功导入教师输出: {teacher_mat_path}")
+        return [teacher_output]
+
+    model_teacher = load_teacher_model(args.u2net_path, device)
+    print(f"成功加载U2Net预训练模型: {args.u2net_path}")
+    teacher_outputs = []
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(training_data_loader):
+            ms, _, pan = batch[0].to(device), batch[1].to(device), batch[2].to(device)
+            if len(pan.shape) == 3:
+                pan = pan.unsqueeze(1)
+            try:
+                output = model_teacher(ms, pan)
+                if isinstance(output, tuple):
+                    output = output[0]
+                teacher_outputs.append(output.cpu())
+            except Exception as e:
+                print(f"批次 {batch_idx} 预计算失败: {str(e)}")
+                teacher_outputs.append(None)
+    return teacher_outputs
+
+
 # ================ 知识蒸馏训练过程 ================ #
-def train(training_data_loader, identifier, teacher_output):
+def train(training_data_loader, identifier, teacher_outputs):
     print("开始知识蒸馏训练...")
 
     start_time = time.time()
 
-    # 教师输出直接来自FusionMamba_2024结果文件（不运行教师网络）
-    teacher_outputs = [teacher_output]
-    
     min_total_loss = float("inf")
    
     for epoch in range(1, epochs + 1):
@@ -185,15 +215,13 @@ def main():
         drop_last=True
     )
     
-    # 导入教师模型输出（来自FusionMamba_2024 results/WV3_full，不加载教师网络）
-    teacher_output, teacher_mat_path = load_teacher_output(data_id, device)
-    print(f"成功导入教师模型输出: {teacher_mat_path}")
+    teacher_outputs = prepare_teacher_outputs(train_loader)
 
     # 模型标识
     identifier = f"{sensor}_{data_id}_FusionNet"
     
     # 开始训练
-    train(train_loader, identifier, teacher_output)
+    train(train_loader, identifier, teacher_outputs)
 
 # 执行主函数
 if __name__ == "__main__":

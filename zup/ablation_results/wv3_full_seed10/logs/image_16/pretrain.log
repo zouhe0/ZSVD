@@ -1,0 +1,10 @@
+Updated sys.path: ['/media/zouhe/Elements/HeZou/zup/FusionMamba', '/media/zouhe/Elements/HeZou/zup', '/home/zouhe/miniconda3/envs/zspan/lib/python310.zip', '/home/zouhe/miniconda3/envs/zspan/lib/python3.10', '/home/zouhe/miniconda3/envs/zspan/lib/python3.10/lib-dynload', '/home/zouhe/miniconda3/envs/zspan/lib/python3.10/site-packages', '/home/zouhe/miniconda3/envs/zspan/lib/python3.10/site-packages/setuptools/_vendor']
+学生模型初始化完成
+已启用混合精度训练 (AMP)
+开始初阶段预训练训练...
+Epoch [2/8] - Loss1(avg_loss): 0.000920
+Epoch [4/8] - Loss1(avg_loss): 0.000874
+Epoch [6/8] - Loss1(avg_loss): 0.000670
+Epoch [8/8] - Loss1(avg_loss): 0.000568
+训练完成，总耗时 1.63 秒
+最终最佳损失: 0.000568

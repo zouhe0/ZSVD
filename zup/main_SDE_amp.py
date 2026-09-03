@@ -12,7 +12,6 @@ from SDE import Net_ms2pan_dual,ms2pan_convNet_dual,sobel_filter
 from loss import SDE_Losses
 import numpy as np
 from wald_utilities import wald_protocol_v2
-import torch.cuda.amp as amp  # 导入混合精度训练模块
 from SDE import sobel_filter
 
 # ================== Pre-Define =================== #
@@ -31,6 +30,7 @@ parser.add_argument("--device", type=str, default='cuda:0', help="Device to use"
 parser.add_argument("--name", type=int,  default=0, help="Data ID (0-19)")
 parser.add_argument("--satellite", type=str, default=None, help="Satellite type")
 parser.add_argument("--data_path", type=str, default='HardDisk/HeZou/test_wv3_OrigScale_multiExm1.h5', help="Data path")
+parser.add_argument("--output_path", type=str, default=None, help="SDE weight output path")
 args = parser.parse_args()
 
 
@@ -38,6 +38,7 @@ lr = args.lr
 epochs = args.epochs
 batch_size = args.batch_size
 device = torch.device(args.device)
+use_amp = device.type == "cuda"
 name = args.name
 satellite = args.satellite
 
@@ -46,12 +47,14 @@ model = ms2pan_convNet_dual().to(device)
 optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999))  # optimizer 1
 criterion = SDE_Losses(device)
 
-scaler = amp.GradScaler()  # 创建一个 GradScaler 对象用于自动混合精度
+scaler = torch.amp.GradScaler("cuda", enabled=use_amp)  # 创建一个 GradScaler 对象用于自动混合精度
 
 
 def save_checkpoint(model, name):  # save model_FUG function
-    model_out_path = 'model_SDE/' + satellite + '/' + str(name) + '_ms2pan_convNet_dual.pth'
-    os.makedirs(os.path.dirname(model_out_path), exist_ok=True)
+    model_out_path = args.output_path or os.path.join(
+        'model_SDE', satellite, str(name) + '_ms2pan_convNet_dual.pth'
+    )
+    os.makedirs(os.path.dirname(os.path.abspath(model_out_path)), exist_ok=True)
     torch.save(model.state_dict(), model_out_path)
 
 
@@ -83,7 +86,7 @@ def train(training_data_loader, name):
             pan_gra_x,pan_gra_y = sobel_filter(pan)  # compute gradient of pan
             ms_gra_x,ms_gra_y = sobel_filter(ms)  # compute gradient of ms
 
-            with amp.autocast():  # 使用自动混合精度
+            with torch.amp.autocast("cuda", enabled=use_amp):  # 使用自动混合精度
                 out1,out2 = model(ms_gra_x,ms_gra_y)
 
                 loss_x = criterion(out1, pan_gra_x)  # compute loss

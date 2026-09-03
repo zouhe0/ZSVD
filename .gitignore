@@ -30,6 +30,7 @@ Dconv/FusionMamba/weights/
 Dconv/FusionMamba/images/
 zup/FusionMamba/model/
 zup/FusionMamba/weights/
+/zup/ablation_results/*/mat/
 zup/FusionMamba/images/
 
 # ===== 杂项 =====

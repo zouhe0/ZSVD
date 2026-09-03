@@ -25,7 +25,10 @@ def process_single_image(data_id, args):
                 f"--ratio={args.ratio}",
                 f"--temperature={args.temperature}",
                 f"--alfa={args.alfa}",
-                F"--data_path={args.data_path}"
+                f"--data_path={args.data_path}",
+                f"--teacher_source={args.teacher_source}",
+                f"--teacher_result_dir={args.teacher_result_dir}",
+                f"--u2net_path={args.u2net_path}"
             ]
             print(f"执行命令: {' '.join(train_cmd)}")
             try:
@@ -73,8 +76,15 @@ def process_single_image(data_id, args):
 
 
             # 等待两个进程都完成 
-            SDE_process.wait()
-            pretrain_process.wait()
+            SDE_returncode = SDE_process.wait()
+            pretrain_returncode = pretrain_process.wait()
+
+            if SDE_returncode != 0 or pretrain_returncode != 0:
+                print(
+                    f"图片 {data_id} 的前置训练失败 "
+                    f"(SDE={SDE_returncode}, Pretrain={pretrain_returncode})，跳过后续蒸馏训练"
+                )
+                return False
 
             print("SDE网络和预训练任务均已完成，开始SDE训练")
             #print(f"执行命令: {' '.join(SDE_train_cmd)}")
@@ -98,7 +108,10 @@ def process_single_image(data_id, args):
                 f"--ratio={args.ratio}",
                 f"--temperature={args.temperature}",
                 f"--alfa={args.alfa}",
-                f"--data_path={args.data_path}"
+                f"--data_path={args.data_path}",
+                f"--teacher_source={args.teacher_source}",
+                f"--teacher_result_dir={args.teacher_result_dir}",
+                f"--u2net_path={args.u2net_path}"
 
                 ]
         
@@ -107,21 +120,21 @@ def process_single_image(data_id, args):
                 train_result = subprocess.run(train_cmd, check=True)
                 
                 train_time = time.time() - image_start_time
-                print(f"U2Net蒸馏训练完成！耗时: {train_time:.2f} 秒")
+                print(f"教师蒸馏训练完成！耗时: {train_time:.2f} 秒")
             except subprocess.CalledProcessError:
-                print(f"图片 {data_id} U2Net蒸馏训练失败，跳过此图片")
+                print(f"图片 {data_id} 教师蒸馏训练失败，跳过此图片")
                 return False
     else:
-        print(f"跳过图片 {data_id} 的U2Net蒸馏训练阶段，直接进行测试...")
+        print(f"跳过图片 {data_id} 的教师蒸馏训练阶段，直接进行测试...")
    
 
 
-    print(f"\n{'='*20} 开始使用U2Net蒸馏训练图片 {data_id} {'='*20}")
+    print(f"\n{'='*20} 开始使用教师蒸馏训练图片 {data_id} {'='*20}")
     print(f"数据ID: {data_id}, 传感器: {args.sensor}, 训练轮数: {args.epochs}")
         
  
     # 2. 测试阶段
-    print(f"\n{'='*20} 开始U2Net蒸馏测试图片 {data_id} {'='*20}")
+    print(f"\n{'='*20} 开始教师蒸馏测试图片 {data_id} {'='*20}")
     
     test_cmd = [
         sys.executable,  # 当前Python解释器
@@ -135,7 +148,9 @@ def process_single_image(data_id, args):
         f"--device={args.device}",
         f"--data_path={args.data_path}",
         f"--sensor_type={args.sensor}",
-        f"--mode={args.mode}"
+        f"--mode={args.mode}",
+        f"--teacher_source={args.teacher_source}",
+        f"--teacher_result_dir={args.teacher_result_dir}"
     
     ]
     
@@ -147,7 +162,7 @@ def process_single_image(data_id, args):
     try:
         test_result = subprocess.run(test_cmd, check=True)
     except subprocess.CalledProcessError:
-        print(f"图片 {data_id} U2Net蒸馏测试失败")
+        print(f"图片 {data_id} 教师蒸馏测试失败")
         return False
     
     ## 显示结果文件路径
@@ -162,7 +177,7 @@ def process_single_image(data_id, args):
 
 def main():
     # 命令行参数解析
-    parser = argparse.ArgumentParser(description="U2Net蒸馏训练与测试一键处理")
+    parser = argparse.ArgumentParser(description="教师蒸馏训练与测试一键处理")
     parser.add_argument("--device", type=str, default="cuda:0", help="训练设备 (cuda/cpu)")
     parser.add_argument('--process_model',type = int, default=1, help ='选择蒸馏模型0:trainba, 1:train_SDE')
     parser.add_argument('--SDE_lr', type=float, default=0.005, help='SDE网络学习率')
@@ -175,18 +190,35 @@ def main():
     parser.add_argument("--sensor", type=str, default="WV3", help="传感器类型")
     parser.add_argument("--ratio", type=int, default=4, help="下采样比例")
     parser.add_argument("--temperature", type=float, default=1.0, help="蒸馏温度参数")
-    parser.add_argument("--data_path", type=str, default=r"D:/DeepLearning/zspan/test_wv3_multiExm1.h5",  help="数据文件路径")
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default=r"/media/zouhe/Elements/Data/PanCollection/test_data/test_wv3_OrigScale_multiExm1.h5",
+        help="数据文件路径"
+    )
     parser.add_argument("--u2net_path", type=str, default=r"FusionMamba/weights/420.pth", help="U2Net预训练模型路径")
+    parser.add_argument("--teacher_source", type=str, default="mat", choices=["mat", "model"], help="教师输出来源")
+    parser.add_argument(
+        "--teacher_result_dir",
+        type=str,
+        default=r"/media/zouhe/Elements/baseline/pansharpening/FusionMamba_2024/results/WV3_full",
+        help="MAT教师输出目录"
+    )
     parser.add_argument("--satellite", type=str, default="WV3/", help="卫星类型（结果保存用）")
     parser.add_argument("--skip_train", action="store_true", help="跳过训练阶段")
     parser.add_argument("--show_results", action="store_true", help="显示融合结果")
     parser.add_argument("--start_id", type=int, default=0, help="起始数据ID (用于process_all)")
     parser.add_argument("--end_id", type=int, default=19, help="结束数据ID (用于process_all)")
-    parser.add_argument("--alfa",type=float, default=0.15, help="U2Net蒸馏模型融合参数")
+    parser.add_argument("--alfa",type=float, default=0.15, help="教师蒸馏模型融合参数")
     parser.add_argument("--pre_epochs",type=int, default=8, help="预训练轮数")
     parser.add_argument("--pre_lr",type=float, default=0.015, help="预训练学习率")#0.15
     parser.add_argument("--mode",type=str, default="normal", choices=["normal", "reduce"], help="模式")
     args = parser.parse_args()
+
+    if not os.path.isfile(args.data_path):
+        parser.error(f"数据文件不存在: {args.data_path}")
+    if args.teacher_source == "mat" and not os.path.isdir(args.teacher_result_dir):
+        parser.error(f"MAT教师输出目录不存在: {args.teacher_result_dir}")
     
     
     total_start_time = time.time()
@@ -237,7 +269,7 @@ def main():
         # 总结
         total_time = time.time() - total_start_time
         print(f"\n{'='*20} 执行完成 {'='*20}")
-        print(f"数据ID: {data_id} 的U2Net蒸馏训练与测试已完成")
+        print(f"数据ID: {data_id} 的教师蒸馏训练与测试已完成")
         print(f"总耗时: {total_time:.2f} 秒")
 
 if __name__ == "__main__":

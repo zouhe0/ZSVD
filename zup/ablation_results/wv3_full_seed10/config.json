@@ -1,0 +1,32 @@
+{
+  "run_name": "wv3_full_seed10",
+  "output_root": "/media/zouhe/Elements/HeZou/zup/ablation_results",
+  "data_path": "/media/zouhe/Elements/Data/PanCollection/test_data/test_wv3_OrigScale_multiExm1.h5",
+  "teacher_source": "mat",
+  "teacher_result_dir": "/media/zouhe/Elements/baseline/pansharpening/FusionMamba_2024/results/WV3_full",
+  "u2net_path": "FusionMamba/weights/420.pth",
+  "device": "cuda:0",
+  "sensor": "WV3",
+  "ratio": 4,
+  "batch_size": 1,
+  "start_id": 0,
+  "end_id": 19,
+  "pre_lr": 0.015,
+  "pre_epochs": 8,
+  "sde_lr": 0.005,
+  "sde_epochs": 45,
+  "lr": 0.00575,
+  "epochs": 240,
+  "temperature": 1.0,
+  "alfa": 0.15,
+  "seed": 10,
+  "variants": [
+    "full",
+    "wo_stage1",
+    "wo_pretrain_loss",
+    "wo_spatial_loss",
+    "wo_spectral_loss",
+    "wo_ssat"
+  ],
+  "run_dir": "/media/zouhe/Elements/HeZou/zup/ablation_results/wv3_full_seed10"
+}

@@ -8,8 +8,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import sys
 import os
-# 导入混合精度训练所需的库
-from torch.cuda.amp import autocast, GradScaler
 from torch.autograd import Variable
 from data import Dataset  # 数据加载器
 from mymodel import FusionNet
@@ -40,6 +38,7 @@ parser.add_argument("--temperature", type=float, default=1.0, help="蒸馏温度
 # 添加混合精度训练的参数选项
 parser.add_argument("--amp",default=True, action="store_true", help="启用混合精度训练")
 parser.add_argument("--data_path",type=str, default="HardDisk/HeZou/test_wv3_OrigScale_multiExm1.h5",help="数据文件路径")
+parser.add_argument("--output_path", type=str, default=None, help="预训练权重输出路径")
 
 args = parser.parse_args()
 
@@ -70,7 +69,7 @@ optimizer = optim.Adam(model_student.parameters(), lr=lr, betas=(0.9, 0.999))
 
 criterion = pretrain_Losses(device)
 # 初始化混合精度训练的GradScaler
-scaler = GradScaler() if use_amp else None
+scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
 if use_amp:
     print("已启用混合精度训练 (AMP)")
@@ -79,8 +78,10 @@ elif args.amp and device.type != 'cuda':
 
 # 模型保存函数
 def save_checkpoint(model, name):
-    os.makedirs("model_pretrain/"+sensor, exist_ok=True)
-    model_out_path = 'model_pretrain/' + sensor + '/' + str(name) + '_FusionNet_pretrain.pth'
+    model_out_path = args.output_path or os.path.join(
+        "model_pretrain", sensor, str(name) + "_FusionNet_pretrain.pth"
+    )
+    os.makedirs(os.path.dirname(os.path.abspath(model_out_path)), exist_ok=True)
     torch.save(model.state_dict(), model_out_path)
 
 # ================ 知识蒸馏训练过程 ================ #
@@ -110,7 +111,7 @@ def train(training_data_loader, name):
             
             # 使用混合精度进行前向传播和损失计算
             if use_amp:
-                with autocast():
+                with torch.amp.autocast("cuda"):
                     # 学生模型前向传播
                     res_student = model_student(lms_rr, pan_rr)
                     fusion_out = res_student + lms_rr

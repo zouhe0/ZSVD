@@ -1,0 +1,15 @@
+Updated sys.path: ['/media/zouhe/Elements/HeZou/zup', '/home/zouhe/miniconda3/envs/zspan/lib/python310.zip', '/home/zouhe/miniconda3/envs/zspan/lib/python3.10', '/home/zouhe/miniconda3/envs/zspan/lib/python3.10/lib-dynload', '/home/zouhe/miniconda3/envs/zspan/lib/python3.10/site-packages', '/home/zouhe/miniconda3/envs/zspan/lib/python3.10/site-packages/setuptools/_vendor']
+学生模型已加载第一阶段权重: /media/zouhe/Elements/HeZou/zup/ablation_results/wv3_full_seed10_main_repro/checkpoints/shared/model_pretrain/WV3/16.pth
+wo_spatial_loss: 不加载SDE空间网络
+已启用混合精度训练 (AMP)
+成功导入教师输出: /media/zouhe/Elements/baseline/pansharpening/FusionMamba_2024/results/WV3_full/output_mulExm_16.mat
+开始知识蒸馏训练...
+消融配置: wo_spatial_loss | 第一阶段=True, 教师蒸馏损失=True, 空间损失=False, 光谱损失=True, SSAT=True
+Epoch [50/240] - Loss1(var): 0.001832, Loss2(fspta): 0.000000, Loss3(fspec): 45.273308, Total Loss: 9668.479492, Checkpoint Loss: 13136.821496
+Epoch [100/240] - Loss1(var): 0.001394, Loss2(fspta): 0.000000, Loss3(fspec): 21.234247, Total Loss: 5783.235352, Checkpoint Loss: 8421.470113
+Epoch [150/240] - Loss1(var): 0.001385, Loss2(fspta): 0.000000, Loss3(fspec): 18.948502, Total Loss: 5491.843750, Checkpoint Loss: 8114.371398
+Epoch [200/240] - Loss1(var): 0.001358, Loss2(fspta): 0.000000, Loss3(fspec): 16.446140, Total Loss: 5131.405273, Checkpoint Loss: 7703.168417
+Epoch [240/240] - Loss1(var): 0.001355, Loss2(fspta): 0.000000, Loss3(fspec): 14.705688, Total Loss: 4916.004883, Checkpoint Loss: 7481.055405
+训练完成，总耗时 2.78 秒
+最终最佳损失: 7481.055405
+模型已保存至: /media/zouhe/Elements/HeZou/zup/ablation_results/wv3_full_seed10_main_repro/checkpoints/wo_spatial_loss/WV3_16_best.pth

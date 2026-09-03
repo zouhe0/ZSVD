@@ -374,14 +374,14 @@ for teacher_name, student_name in pairs:
 # ============================================================
 
 ax.set_xlabel(
-    r'Spatial Distortion $D_\lambda$ ($\times 10^{-2}$)',
+    r'Spatial Distortion $D_s$ ($\times 10^{-2}$)',
     labelpad=13,
     fontsize=13.5,
     fontweight='bold'
 )
 
 ax.set_ylabel(
-    r'Spectral Distortion $D_s$ ($\times 10^{-2}$)',
+    r'Spectral Distortion $D_\lambda$ ($\times 10^{-2}$)',
     labelpad=13,
     fontsize=13.5,
     fontweight='bold'

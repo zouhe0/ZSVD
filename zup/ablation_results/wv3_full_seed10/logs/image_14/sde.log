@@ -1,0 +1,4 @@
+Run SDE...
+SDE stage: Epoch: 20 training loss: 0.0001558
+SDE stage: Epoch: 40 training loss: 0.0000741
+SDE time: 1.6061770915985107s

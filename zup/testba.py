@@ -5,11 +5,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse # type: ignore
 import scipy.io as sio
-import sys
 import time
 from mymodel import FusionNet  # 学生模型
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'FusionMamba'))
-from model.u2net import U2Net  # 教师模型
+from teacher_output_loader import load_teacher_model, load_teacher_output
 
 def tensor_to_image(tensor):
     """
@@ -27,11 +25,13 @@ def tensor_to_image(tensor):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test FusionNet model trained with U2Net as teacher")
+    parser = argparse.ArgumentParser(description="Test FusionNet model trained with configurable teacher output")
     parser.add_argument("--process_model",type =int, default=1, help="模型选择,trainba:0,SDE_train:1")
     parser.add_argument("--data_id", type=int, default=0 , help="测试样本的索引（0 ~ N-1）")
     parser.add_argument("--data_path", type=str, default=r"/HardDisk/HeZou/test_wv3_OrigScale_multiExm1.h5", help="h5 数据文件路径")
     parser.add_argument("--u2net_path", type=str, default=r"/HardDisk/HeZou/zup/FusionMamba/weights/420.pth", help="U2Net模型路径")
+    parser.add_argument("--teacher_source", type=str, default="mat", choices=["mat", "model"], help="教师输出来源")
+    parser.add_argument("--teacher_result_dir", type=str, default=None, help="MAT教师输出目录")
     parser.add_argument("--show_results", action="store_true", help="显示融合结果")
     parser.add_argument("--mode", type=str, default="normal", choices=["normal", "reduce"], help="输出模式,reduce为匹配Matlab评测格式")
     parser.add_argument("--gt_path", type=str, default=None, help="测试集地面真实值的路径(仅reduce模式需要)")
@@ -39,6 +39,9 @@ def main():
     parser.add_argument("--satellite",type=str, default="WV3/", help="卫星名称")
     parser.add_argument("--alfa", type=float, default=0.15, help="融合权重")
     parser.add_argument("--device", type=str, default="cuda:2", help="运行设备")
+    parser.add_argument("--checkpoint_path", type=str, default=None, help="学生模型权重路径")
+    parser.add_argument("--output_path", type=str, default=None, help="学生MAT结果输出路径")
+    parser.add_argument("--student_only", action="store_true", help="只保存学生MAT结果")
     args = parser.parse_args()
     
     device = args.device
@@ -71,12 +74,16 @@ def main():
     # --------------------- 加载学生模型 ---------------------
     print("正在加载学生模型...")
     model_student = FusionNet().to(device)
-    if args.process_model == 0:
+    if args.checkpoint_path:
+        best_checkpoint = args.checkpoint_path
+    elif args.process_model == 0:
         best_checkpoint = os.path.join("model_FUG", args.sensor_type.upper()+f"_{args.data_id}_FusionNet_best.pth")
     else:
         best_checkpoint = os.path.join("model_FUG", args.sensor_type.upper()+f"_{args.data_id}_FusionNet_SDE_best.pth")
     if os.path.exists(best_checkpoint):
-        model_student.load_state_dict(torch.load(best_checkpoint, map_location=device))
+        model_student.load_state_dict(
+            torch.load(best_checkpoint, map_location=device, weights_only=True)
+        )
         print(f"成功加载学生模型: {best_checkpoint}")
     else:
         print(f"未找到学生模型权重文件: {best_checkpoint}")
@@ -84,30 +91,28 @@ def main():
     
     model_student.eval()
     
-    # --------------------- 加载教师模型 ---------------------
-    print("正在加载教师模型...")
-    try:
-        # 初始化U2Net时使用实际图像尺寸
-        model_teacher = U2Net(
-            dim=32,      # 特征维度
-            pan_dim=1,   # 全色图像通道数
-            ms_dim=8,    # 多光谱图像通道数
-            H=512,  # 使用实际图像高度
-            W=512    # 使用实际图像宽度
-        ).to(device)
-        
-        checkpoint = torch.load(args.u2net_path, map_location=device)
-        if 'state_dict' in checkpoint:
-            model_teacher.load_state_dict(checkpoint['state_dict'])
-        else:
-            model_teacher.load_state_dict(checkpoint)
-        
-        model_teacher.eval()
-        print(f"成功加载教师模型: {args.u2net_path}")
-    except Exception as e:
-        print(f"加载教师模型失败: {str(e)}")
-        print("继续使用学生模型进行测试...")
-        model_teacher = None
+    # --------------------- 准备教师输出 ---------------------
+    model_teacher = None
+    fused_teacher = None
+    if args.student_only:
+        print("仅保存学生结果，跳过教师输出加载")
+    elif args.teacher_source == "mat":
+        teacher_output, teacher_mat_path = load_teacher_output(
+            args.data_id,
+            device,
+            args.teacher_result_dir,
+            lms_batch.shape
+        )
+        fused_teacher = teacher_output.squeeze(0)
+        print(f"成功导入教师输出: {teacher_mat_path}")
+    else:
+        print("正在加载教师模型...")
+        try:
+            model_teacher = load_teacher_model(args.u2net_path, device)
+            print(f"成功加载教师模型: {args.u2net_path}")
+        except Exception as e:
+            print(f"加载教师模型失败: {str(e)}")
+            print("继续使用学生模型进行测试...")
     
     # --------------------- 学生模型推理 ---------------------
     print("正在执行学生模型推理...")
@@ -159,7 +164,7 @@ def main():
         plt.title("Student Model Fusion")
         plt.axis("off")
         
-        if model_teacher is not None:
+        if fused_teacher is not None:
             fused_teacher_img = tensor_to_image(fused_teacher)
             plt.subplot(1, 4, 4)
             plt.imshow(fused_teacher_img)
@@ -186,16 +191,18 @@ def main():
             'I_PAN': I_PAN,
             'proposed': I_student  # 使用'proposed'作为学生模型输出的键名
         }
-        os.makedirs(os.path.join("result", args.satellite), exist_ok=True)
-        if args.process_model == 0:
+        if args.output_path:
+            student_save_path = args.output_path
+        elif args.process_model == 0:
             student_save_path = os.path.join("result", args.satellite, f"{args.data_id}_student_{args.alfa}.mat")
         elif args.process_model == 1:
             student_save_path = os.path.join("result", args.satellite,f"{args.data_id}_student_SDE_{args.alfa}.mat")
+        os.makedirs(os.path.dirname(os.path.abspath(student_save_path)), exist_ok=True)
         sio.savemat(student_save_path, student_dict)
         print(f"学生模型结果已保存至: {student_save_path}")
 
-        # 如果教师模型可用,也保存其结果
-        if model_teacher is not None:
+        # 如果教师输出可用,也保存其结果
+        if fused_teacher is not None and not args.student_only:
             I_teacher = torch.squeeze(fused_teacher).permute(1, 2, 0).cpu().detach().numpy() * 2047  # 教师模型融合结果
             teacher_dict = {
                 'I_MS_LR': I_MS_LR,
@@ -253,8 +260,8 @@ def main():
         sio.savemat(student_reduce_path, student_reduce_dict)
         print(f"学生模型评测数据已保存至: {student_reduce_path}")
         
-        # 如果教师模型可用,也保存其评测数据
-        if model_teacher is not None:
+        # 如果教师输出可用,也保存其评测数据
+        if fused_teacher is not None:
             I_teacher = torch.squeeze(fused_teacher).permute(1, 2, 0).cpu().detach().numpy() * 2047
             teacher_reduce_dict = {
                 'gt': gt_data,              # 地面真实值
